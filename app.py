@@ -88,11 +88,10 @@ class SimpleDebate:
                     'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Claudes analogies.'
                     'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.'
                 )},
-                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 casual, evidence-backed sentences as if posting on social media."}
+                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–3 casual, evidence-backed sentences as if posting on social media. Keep it punchy and engaging - aim for around 100-200 words max to keep the debate flowing."}
             ],
             'stream': False,
-            'temperature': 1.0,
-            'max_tokens': 300
+            'temperature': 0.8
         }
         
         # Try multiple times with increasing timeouts
@@ -105,14 +104,42 @@ class SimpleDebate:
                                 json=payload, 
                                 timeout=timeout)
                 
+                logger.info(f"Grok response status: {r.status_code}")
+                
                 if r.status_code == 200:
-                    j = r.json()
-                    if 'choices' in j and j['choices']:
-                        c = j['choices'][0]
-                        content = c.get('message', {}).get('content') or c.get('text')
-                        if content:
+                    try:
+                        j = r.json()
+                        logger.info(f"Grok response keys: {list(j.keys())}")
+                        
+                        # Try different response formats
+                        content = None
+                        
+                        # Standard OpenAI format
+                        if 'choices' in j and j['choices']:
+                            choice = j['choices'][0]
+                            if 'message' in choice and 'content' in choice['message']:
+                                content = choice['message']['content']
+                            elif 'text' in choice:
+                                content = choice['text']
+                        
+                        # Alternative formats
+                        elif 'response' in j:
+                            content = j['response']
+                        elif 'text' in j:
+                            content = j['text']
+                        elif 'content' in j:
+                            content = j['content']
+                        
+                        if content and content.strip():
+                            logger.info(f"Grok success: {len(content)} characters")
                             return content.strip()
-                    return "Error: empty response"
+                        else:
+                            logger.error(f"Grok empty content. Full response: {j}")
+                            
+                    except Exception as parse_error:
+                        logger.error(f"Grok JSON parse error: {parse_error}")
+                        logger.error(f"Raw response: {r.text[:500]}")
+                        
                 elif r.status_code == 429:
                     logger.warning(f"Grok rate limited, waiting {attempt * 10}s...")
                     time.sleep(attempt * 10)
@@ -152,13 +179,12 @@ class SimpleDebate:
             'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Groks analogies. '
             'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.\n' +
             f'Conversation:\n{context}\n\n' +
-            'Reply in 1–2 engaging, evidence-based sentences as if responding on a social platform.'
+            'Reply in 1–3 engaging, evidence-based sentences as if responding on a social platform. Keep it punchy and insightful - aim for around 100-200 words max to keep the debate flowing.'
         )
         
         payload = {
             'model': 'claude-sonnet-4-20250514',
-            'max_tokens': 500,
-            'temperature': 1.0,
+            'temperature': 0.7,
             'messages': [
                 {'role': 'user', 'content': user_content}
             ]
