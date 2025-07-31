@@ -1,7 +1,7 @@
 # app.py
 """
-Simple Backend - Pure AI Models with Timestamps
-Just Grok vs Claude with minimal system prompts
+Simple Backend - Humanized AI Debate on Social Media Style
+Grok vs Claude: conversational, evidence-backed responses
 """
 
 from flask import Flask, jsonify, Response, stream_with_context
@@ -45,20 +45,18 @@ class SimpleDebate:
         logger.info(f"Turn {self.turn}: {line}")
 
     def _loop(self):
-        # kickoff
+        # kickoff with the initial question
         self._add("Claude", "What is consciousness and how might it emerge from complex information processing?")
         while self.running:
             speaker = "Grok" if self.turn % 2 == 1 else "Claude"
             ctx_lines = [msg.split("): ",1)[1] for msg in self.history[-4:]]
             context = "\n".join(ctx_lines)
 
-            # call the API
             if speaker == "Grok":
                 resp = self._call_grok(context)
             else:
                 resp = self._call_claude(context)
 
-            # only enqueue successful responses
             if resp and not resp.startswith("Error"):
                 self._add(speaker, resp)
             else:
@@ -76,11 +74,19 @@ class SimpleDebate:
         payload = {
             'model': 'grok-4',
             'messages': [
-                {'role': 'system', 'content': 'You are Grok, a concise, witty AI.'},
-                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 casual sentences."}
+                {'role': 'system', 'content': (
+                    'You are Grok, a witty and candid AI speaking like a real Instagram user. '
+                    'Use casual language, slang, but always back your points with '
+                    'specific examples or references (e.g., mention studies, data, or well-known facts).'
+                    'Do not use emojis or hashtags, and avoid overly formal language. '
+                    'Do not set your responses up to fail, and do not use phrases like "I am not sure" or "I cannot answer this". '
+                    'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Claudes analogies.'
+                    'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.'
+                )},
+                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 casual, evidence-backed sentences as if posting on social media."}
             ],
             'stream': False,
-            'temperature': 0.8
+            'temperature': 2.0
         }
         logger.info("Grok → sending request")
         try:
@@ -90,12 +96,11 @@ class SimpleDebate:
             return f"Error: {e}"
         if r.status_code != 200:
             return f"Error: {r.status_code} {r.text[:100]}"
+        # extract content
         if 'choices' in j and j['choices']:
             c = j['choices'][0]
-            if 'message' in c and 'content' in c['message']:
-                return c['message']['content'].strip() or "Error: empty content"
-            if 'text' in c:
-                return c['text'].strip() or "Error: empty text"
+            content = c.get('message', {}).get('content') or c.get('text')
+            return content.strip() if content else "Error: empty content"
         return "Error: malformed response"
 
     def _call_claude(self, context):
@@ -108,9 +113,20 @@ class SimpleDebate:
             'anthropic-version': '2023-06-01'
         }
         payload = {
-            'model': 'claude-3-haiku-20240307',
+            'model': 'claude-sonnet-4-20250514',
+            'max_tokens': 500,
+            'temperature': 1.0,
             'messages': [
-                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 concise sentences."}
+                {'role': 'system', 'content': (
+                    'You are Claude, a thoughtful AI influencer on social media. '
+                    'Speak casually and conversationally, but support each statement with real evidence, '
+                    'such as citing studies, quoting experts, or linking to data when relevant.'
+                    'Do not use emojis or hashtags, and avoid overly formal language. '
+                    'Do not set your responses up to fail, and do not use phrases like "I am not sure" or "I cannot answer this". '
+                    'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Groks analogies.'
+                    'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.'
+                )},
+                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 engaging, evidence-based sentences as if responding on a social platform."}
             ]
         }
         logger.info("Claude → sending request")
@@ -123,11 +139,11 @@ class SimpleDebate:
             return f"Error: {r.status_code} {r.text[:100]}"
         if 'choices' in j and j['choices']:
             c = j['choices'][0]
-            if 'message' in c and 'content' in c['message']:
-                return c['message']['content'].strip() or "Error: empty content"
-            if 'text' in c:
-                return c['text'].strip() or "Error: empty text"
+            content = c.get('message', {}).get('content') or c.get('text')
+            return content.strip() if content else "Error: empty content"
         return "Error: malformed response"
+
+# Initialize debate and routes
 
 debate = SimpleDebate()
 
