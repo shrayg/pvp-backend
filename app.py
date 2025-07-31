@@ -77,7 +77,7 @@ class SimpleDebate:
         }
         
         payload = {
-            'model': 'grok-beta',
+            'model': 'grok-4',
             'messages': [
                 {'role': 'system', 'content': (
                      'You are Grok, a witty and candid AI speaking like a real Instagram user. '
@@ -91,7 +91,7 @@ class SimpleDebate:
                 {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 casual, evidence-backed sentences as if posting on social media."}
             ],
             'stream': False,
-            'temperature': 0.8,
+            'temperature': 1.0,
             'max_tokens': 300
         }
         
@@ -157,8 +157,8 @@ class SimpleDebate:
         
         payload = {
             'model': 'claude-sonnet-4-20250514',
-            'max_tokens': 300,
-            'temperature': 0.7,
+            'max_tokens': 500,
+            'temperature': 1.0,
             'messages': [
                 {'role': 'user', 'content': user_content}
             ]
