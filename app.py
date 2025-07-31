@@ -55,46 +55,54 @@ class SimpleDebate:
         logger.info(f"Turn {self.turn_count}: {formatted_message}")
         
     def _run_debate(self):
-        # Start with a simple question
-        initial_question = "What is consciousness?"
-        self._add_message("Grok", initial_question)
+        # Start with Claude asking the initial question
+        initial_question = "What is consciousness and how might it emerge from complex information processing?"
+        self._add_message("Claude", initial_question)
         
         while self.is_running:
             try:
-                # Alternate between Claude and Grok
-                current_ai = "Claude" if self.turn_count % 2 == 1 else "Grok"
+                # Alternate between Claude and Grok (Claude starts, so Grok responds on even turns)
+                current_ai = "Grok" if self.turn_count % 2 == 1 else "Claude"
                 
-                # Build minimal context (last 3 messages, remove timestamps for AI context)
+                # Build conversation context (last 4 messages for better context)
                 clean_history = []
-                for msg in self.history[-3:]:
+                for msg in self.history[-4:]:
                     # Extract just the AI name and message, removing timestamp
-                    if ") " in msg:
-                        parts = msg.split(") ", 1)
-                        ai_part = parts[0].split(" (")[0]  # Get AI name before timestamp
-                        message_part = parts[1] if len(parts) > 1 else ""
-                        clean_history.append(f"{ai_part}: {message_part}")
+                    if ") " in msg and " (" in msg:
+                        parts = msg.split(" (", 1)
+                        ai_name = parts[0]
+                        remaining = parts[1].split("): ", 1)
+                        if len(remaining) > 1:
+                            message_content = remaining[1]
+                            clean_history.append(f"{ai_name}: {message_content}")
                 
                 context = "\n".join(clean_history)
                 
-                # Get response with minimal system prompt
+                # Get response
                 if current_ai == "Grok":
                     response = self._ask_grok(context)
                 else:
                     response = self._ask_claude(context)
                 
-                self._add_message(current_ai, response)
+                # Only add message if we got a valid response
+                if not response.startswith("Error") and response.strip():
+                    self._add_message(current_ai, response)
+                else:
+                    logger.error(f"{current_ai} failed with: {response}")
+                    # Add error message to history for debugging
+                    self._add_message(current_ai, f"[API Error: {response}]")
                 
-                # Simple delay
-                time.sleep(3)
+                # Delay between turns
+                time.sleep(5)
                 
             except Exception as e:
-                logger.error(f"Error: {e}")
-                time.sleep(5)
+                logger.error(f"Debate loop error: {e}")
+                time.sleep(10)
                 
     def _ask_grok(self, context):
         api_key = os.getenv('GROK_API_KEY')
         if not api_key:
-            return "API key not configured"
+            return "Error: GROK_API_KEY not configured"
         
         try:
             headers = {
@@ -102,39 +110,57 @@ class SimpleDebate:
                 'Content-Type': 'application/json'
             }
             
+            # Build a proper conversation prompt
+            prompt = f"""You are Grok, an AI assistant with a unique perspective. Here's the recent conversation:
+
+{context}
+
+Please respond with your thoughts on this topic. Keep your response to 1-2 sentences and share your genuine perspective."""
+            
             data = {
                 'messages': [
                     {
                         'role': 'user',
-                        'content': f"Previous conversation:\n{context}\n\nRespond with your perspective in one sentence."
+                        'content': prompt
                     }
                 ],
                 'model': 'grok-beta',
                 'stream': False,
-                'temperature': 0.7,
-                'max_tokens': 150
+                'temperature': 0.8,
+                'max_tokens': 200
             }
             
+            logger.info(f"Sending request to Grok API...")
             response = requests.post(
                 'https://api.x.ai/v1/chat/completions',
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=45
             )
+            
+            logger.info(f"Grok API response status: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
-                return result['choices'][0]['message']['content'].strip()
+                if 'choices' in result and len(result['choices']) > 0:
+                    return result['choices'][0]['message']['content'].strip()
+                else:
+                    return "Error: Empty response from Grok API"
             else:
-                return f"Error {response.status_code}"
+                error_text = response.text[:200] if response.text else "No error details"
+                return f"Error {response.status_code}: {error_text}"
                 
+        except requests.exceptions.Timeout:
+            return "Error: Grok API timeout"
+        except requests.exceptions.RequestException as e:
+            return f"Error: Network issue - {str(e)[:100]}"
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)[:100]}"
             
     def _ask_claude(self, context):
         api_key = os.getenv('CLAUDE_API_KEY')
         if not api_key:
-            return "API key not configured"
+            return "Error: CLAUDE_API_KEY not configured"
         
         try:
             headers = {
@@ -143,32 +169,50 @@ class SimpleDebate:
                 'anthropic-version': '2023-06-01'
             }
             
+            # Build a proper conversation prompt
+            prompt = f"""You are Claude, participating in a philosophical discussion. Here's the recent conversation:
+
+{context}
+
+Please respond with your perspective on this topic. Keep your response to 1-2 sentences."""
+            
             data = {
                 'model': 'claude-3-haiku-20240307',
-                'max_tokens': 150,
+                'max_tokens': 200,
                 'messages': [
                     {
                         'role': 'user',
-                        'content': f"Previous conversation:\n{context}\n\nRespond with your perspective in one sentence."
+                        'content': prompt
                     }
                 ]
             }
             
+            logger.info(f"Sending request to Claude API...")
             response = requests.post(
                 'https://api.anthropic.com/v1/messages',
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=45
             )
+            
+            logger.info(f"Claude API response status: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
-                return result['content'][0]['text'].strip()
+                if 'content' in result and len(result['content']) > 0:
+                    return result['content'][0]['text'].strip()
+                else:
+                    return "Error: Empty response from Claude API"
             else:
-                return f"Error {response.status_code}"
+                error_text = response.text[:200] if response.text else "No error details"
+                return f"Error {response.status_code}: {error_text}"
                 
+        except requests.exceptions.Timeout:
+            return "Error: Claude API timeout"
+        except requests.exceptions.RequestException as e:
+            return f"Error: Network issue - {str(e)[:100]}"
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)[:100]}"
 
 # Global debate instance
 debate = SimpleDebate()
@@ -205,11 +249,48 @@ def get_logs():
 
 @app.route('/')
 def health():
+    # Check API keys
+    grok_key = "✓" if os.getenv('GROK_API_KEY') else "✗"
+    claude_key = "✓" if os.getenv('CLAUDE_API_KEY') else "✗"
+    
     return jsonify({
         'status': 'running',
         'total_messages': len(debate.history),
-        'debate_active': debate.is_running
+        'debate_active': debate.is_running,
+        'api_keys': {
+            'grok': grok_key,
+            'claude': claude_key
+        }
     })
+
+# Test endpoint to check API connectivity
+@app.route('/test-apis')
+def test_apis():
+    results = {}
+    
+    # Test Grok API
+    try:
+        debate_instance = SimpleDebate()
+        grok_response = debate_instance._ask_grok("Test: Hello")
+        results['grok'] = {
+            'status': 'success' if not grok_response.startswith('Error') else 'error',
+            'response': grok_response[:100]
+        }
+    except Exception as e:
+        results['grok'] = {'status': 'error', 'response': str(e)[:100]}
+    
+    # Test Claude API
+    try:
+        debate_instance = SimpleDebate()
+        claude_response = debate_instance._ask_claude("Test: Hello")
+        results['claude'] = {
+            'status': 'success' if not claude_response.startswith('Error') else 'error',
+            'response': claude_response[:100]
+        }
+    except Exception as e:
+        results['claude'] = {'status': 'error', 'response': str(e)[:100]}
+    
+    return jsonify(results)
 
 if __name__ == '__main__':
     # Auto-start
