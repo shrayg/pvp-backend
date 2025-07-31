@@ -124,7 +124,7 @@ Please respond with your thoughts on this topic. Keep your response to 1-2 sente
                         'content': prompt
                     }
                 ],
-                'model': 'grok-beta',
+                'model': 'grok-4',
                 'stream': False,
                 'temperature': 0.8,
                 'max_tokens': 200
