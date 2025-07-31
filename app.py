@@ -64,7 +64,7 @@ class SimpleDebate:
                 time.sleep(5)
                 continue
 
-            time.sleep(10)
+            time.sleep(20)
 
     def _call_grok(self, context):
         key = os.getenv('GROK_API_KEY')
@@ -83,7 +83,7 @@ class SimpleDebate:
                     'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Claudes analogies.'
                     'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.'
                 )},
-                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 casual, evidence-backed sentences as if posting on social media."}
+                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1 casual, evidence-backed sentences as if posting on social media."}
             ],
             'stream': False,
             'temperature': 2.0
@@ -121,7 +121,7 @@ class SimpleDebate:
             'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Groks analogies. '
             'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.\n' +
             f'Conversation:\n{context}\n\n' +
-            'Reply in 1–2 engaging, evidence-based sentences as if responding on a social platform.'
+            'Reply in 1 engaging, evidence-based sentences as if responding on a social platform.'
         )
         
         payload = {
