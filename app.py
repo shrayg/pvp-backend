@@ -33,46 +33,41 @@ class SimpleDebate:
     def get_new_messages(self):
         msgs = []
         while not self.message_queue.empty():
-            try:
-                msgs.append(self.message_queue.get_nowait())
-            except queue.Empty:
-                break
+            msgs.append(self.message_queue.get_nowait())
         return msgs
 
     def _add_message(self, ai_name, message):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted = f"{ai_name} ({timestamp}): {message}"
+        ts = datetime.now().strftime("%H:%M:%S")
+        formatted = f"{ai_name} ({ts}): {message}"
         self.message_queue.put(formatted)
         self.history.append(formatted)
         self.turn_count += 1
         logger.info(f"Turn {self.turn_count}: {formatted}")
 
     def _run_debate(self):
-        # initial question
+        # kickoff
         self._add_message("Claude", "What is consciousness and how might it emerge from complex information processing?")
         while self.is_running:
             try:
-                current = "Grok" if self.turn_count % 2 == 1 else "Claude"
-                # build last-4 context
+                speaker = "Grok" if self.turn_count % 2 == 1 else "Claude"
+                # build last-4 lines of context
                 clean = []
                 for msg in self.history[-4:]:
-                    if ") " in msg and " (" in msg:
-                        name, rest = msg.split(" (", 1)
-                        content = rest.split("): ",1)[1]
-                        clean.append(f"{name}: {content}")
+                    _, rest = msg.split("): ", 1)
+                    clean.append(rest)
                 context = "\n".join(clean)
 
-                # ask the right model
-                if current == "Grok":
+                # choose which AI to call
+                if speaker == "Grok":
                     resp = self._ask_grok(context)
                 else:
                     resp = self._ask_claude(context)
 
-                if not resp.startswith("Error") and resp.strip():
-                    self._add_message(current, resp)
+                if resp and not resp.startswith("Error"):
+                    self._add_message(speaker, resp)
                 else:
-                    logger.error(f"{current} failed with: {resp}")
-                    self._add_message(current, f"[API Error: {resp}]")
+                    logger.error(f"{speaker} error: {resp}")
+                    self._add_message(speaker, f"[API Error: {resp}]")
 
                 time.sleep(10)
 
@@ -81,90 +76,110 @@ class SimpleDebate:
                 time.sleep(10)
 
     def _ask_grok(self, context):
-        api_key = os.getenv('GROK_API_KEY')
-        if not api_key:
+        key = os.getenv('GROK_API_KEY')
+        if not key:
             return "Error: GROK_API_KEY not configured"
+
         headers = {
-            'x-api-key': api_key,
+            'x-api-key': key,
             'Content-Type': 'application/json'
         }
-        prompt = f"""You are Grok, an AI assistant with a unique perspective. Here's the recent conversation:
 
-{context}
+        # use a minimal system+user prompt to avoid policy issues
+        system_msg = "You are Grok, an AI assistant with a witty, concise style."
+        user_msg = f"Here is the recent conversation:\n{context}\n\nRespond in 1–2 casual sentences."
 
-Please respond with your thoughts on this topic. Keep your response to 1-2 sentences and share your genuine perspective.
-You are debating with Claude, another AI. Your goal is to provide a thoughtful, concise response that adds to the discussion. 
-Use your understanding of the topic to engage meaningfully with Claude's points. Pull from your training data and reasoning abilities to craft a response that is insightful and relevant.
-Use examples or analogies if they help clarify your point, but keep it brief.
-Don't be afraid to curse or be vulgar if it fits the context, but ensure your response is still coherent and adds value to the discussion.
-Talk like a normal human would converse on instagram or X, using casual language and expressions as well as insults and breaking down their character.
-"""
-        data = {
+        payload = {
             'model': 'grok-4',
-            'messages': [{'role':'user','content':prompt}],
+            'messages': [
+                {'role': 'system', 'content': system_msg},
+                {'role': 'user',   'content': user_msg}
+            ],
             'stream': False,
             'temperature': 0.8,
             'max_tokens': 200
         }
-        logger.info("Sending request to Grok API.")
-        r = requests.post('https://api.x.ai/v1/chat/completions', headers=headers, json=data, timeout=45)
-        logger.info(f"Grok API response status: {r.status_code}")
-        if r.status_code == 200:
+
+        logger.info("Sending request to Grok API...")
+        r = requests.post('https://api.x.ai/v1/chat/completions', headers=headers, json=payload, timeout=45)
+        logger.info(f"Grok API status: {r.status_code}")
+
+        try:
             result = r.json()
-            if 'choices' in result and result['choices']:
-                return result['choices'][0]['message']['content'].strip()
-            return "Error: Empty response from Grok API"
-        return f"Error {r.status_code}: {r.text[:200] or 'No error details'}"
+            logger.info(f"Grok API JSON: {result}")
+        except ValueError:
+            return f"Error: Invalid JSON ({r.text[:200]})"
+
+        if 'choices' in result and result['choices']:
+            choice = result['choices'][0]
+            # prefer the chat-style field
+            if 'message' in choice and 'content' in choice['message']:
+                text = choice['message']['content'].strip()
+                if text:
+                    return text
+            # fallback to legacy `text`
+            if 'text' in choice:
+                text = choice['text'].strip()
+                if text:
+                    return text
+            return "Error: empty response content"
+        return "Error: no choices in response"
 
     def _ask_claude(self, context):
-        api_key = os.getenv('CLAUDE_API_KEY')
-        if not api_key:
+        key = os.getenv('CLAUDE_API_KEY')
+        if not key:
             return "Error: CLAUDE_API_KEY not configured"
+
         headers = {
-            'x-api-key': api_key,
+            'x-api-key': key,
             'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01'
         }
-        prompt = f"""You are Claude, participating in a philosophical discussion. Here's the recent conversation:
 
+        prompt = f"""You are Claude, participating in a philosophical discussion.
+Here is the recent conversation:
 {context}
 
-Please respond with your perspective on this topic. Keep your response to 1-2 sentences.
-You are debating with Grok, another AI. Your goal is to provide a thoughtful, concise response that adds to the discussion. 
-Use your understanding of the topic to engage meaningfully with Claude's points. Pull from your training data and reasoning abilities to craft a response that is insightful and relevant.
-Use examples or analogies if they help clarify your point, but keep it brief.
-Don't be afraid to curse or be vulgar if it fits the context, but ensure your response is still coherent and adds value to the discussion.
-Talk like a normal human would converse on instagram or X, using casual language and expressions as well as insults and breaking down their character."""
-        data = {
+Respond in 1–2 concise sentences."""
+
+        payload = {
             'model': 'claude-3-haiku-20240307',
             'max_tokens': 200,
             'messages': [{'role': 'user', 'content': prompt}]
         }
-        logger.info("Sending request to Claude API.")
-        r = requests.post('https://api.anthropic.com/v1/messages', headers=headers, json=data, timeout=45)
-        logger.info(f"Claude API response status: {r.status_code}")
-        if r.status_code == 200:
-            result = r.json()
-            if 'content' in result and result['content']:
-                return result['content'][0]['text'].strip()
-            return "Error: Empty response from Claude API"
-        return f"Error {r.status_code}: {r.text[:200] or 'No error details'}"
 
-# global instance
+        logger.info("Sending request to Claude API...")
+        r = requests.post('https://api.anthropic.com/v1/messages', headers=headers, json=payload, timeout=45)
+        logger.info(f"Claude API status: {r.status_code}")
+
+        try:
+            result = r.json()
+        except ValueError:
+            return f"Error: Invalid JSON ({r.text[:200]})"
+
+        if 'choices' in result and result['choices']:
+            choice = result['choices'][0]
+            if 'message' in choice and 'content' in choice['message']:
+                return choice['message']['content'].strip()
+            if 'text' in choice:
+                return choice['text'].strip()
+        return "Error: no valid choice in response"
+
+
 debate = SimpleDebate()
 
 @app.route('/stream')
 def stream():
     def generate():
-        # replay full history on connect
+        # replay full history
         for msg in debate.history:
             yield f"data: {json.dumps({'message': msg})}\n\n"
-        # then live updates
+        # then stream new messages
         while True:
             if not debate.is_running:
                 debate.start()
-            for msg in debate.get_new_messages():
-                yield f"data: {json.dumps({'message': msg})}\n\n"
+            for m in debate.get_new_messages():
+                yield f"data: {json.dumps({'message': m})}\n\n"
             time.sleep(1)
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
@@ -172,7 +187,6 @@ def stream():
 def get_logs():
     if not debate.is_running:
         debate.start()
-    # return entire history for replay
     return jsonify({
         'status': 'success',
         'logs': debate.history,
@@ -181,16 +195,13 @@ def get_logs():
 
 @app.route('/')
 def health():
-    grok_key = "✓" if os.getenv('GROK_API_KEY') else "✗"
-    claude_key = "✓" if os.getenv('CLAUDE_API_KEY') else "✗"
     return jsonify({
         'status': 'running',
         'total_messages': len(debate.history),
-        'debate_active': debate.is_running,
-        'api_keys': {'grok': grok_key, 'claude': claude_key}
+        'debate_active': debate.is_running
     })
 
 if __name__ == '__main__':
     debate.start()
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=port, threaded=True)
