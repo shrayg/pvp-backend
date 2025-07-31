@@ -64,15 +64,20 @@ class SimpleDebate:
                 time.sleep(5)
                 continue
 
-            time.sleep(20)
+            time.sleep(10)
 
     def _call_grok(self, context):
         key = os.getenv('GROK_API_KEY')
         if not key:
             return "Error: GROK_API_KEY missing"
-        headers = {'x-api-key': key, 'Content-Type': 'application/json'}
+            
+        headers = {
+            'Authorization': f'Bearer {key}',
+            'Content-Type': 'application/json'
+        }
+        
         payload = {
-            'model': 'grok-4',
+            'model': 'grok-beta',
             'messages': [
                 {'role': 'system', 'content': (
                      'You are Grok, a witty and candid AI speaking like a real Instagram user. '
@@ -83,24 +88,50 @@ class SimpleDebate:
                     'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Claudes analogies.'
                     'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.'
                 )},
-                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1 casual, evidence-backed sentences as if posting on social media."}
+                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 casual, evidence-backed sentences as if posting on social media."}
             ],
             'stream': False,
-            'temperature': 2.0
+            'temperature': 0.8,
+            'max_tokens': 300
         }
-        logger.info("Grok → sending request")
-        try:
-            r = requests.post('https://api.x.ai/v1/chat/completions', headers=headers, json=payload, timeout=30)
-            j = r.json()
-        except Exception as e:
-            return f"Error: {e}"
-        if r.status_code != 200:
-            return f"Error: {r.status_code} {r.text[:100]}"
-        if 'choices' in j and j['choices']:
-            c = j['choices'][0]
-            content = c.get('message', {}).get('content') or c.get('text')
-            return content.strip() if content else "Error: empty content"
-        return "Error: malformed response"
+        
+        # Try multiple times with increasing timeouts
+        timeouts = [15, 30, 45]
+        for attempt, timeout in enumerate(timeouts, 1):
+            logger.info(f"Grok → attempt {attempt}/{len(timeouts)} (timeout: {timeout}s)")
+            try:
+                r = requests.post('https://api.x.ai/v1/chat/completions', 
+                                headers=headers, 
+                                json=payload, 
+                                timeout=timeout)
+                
+                if r.status_code == 200:
+                    j = r.json()
+                    if 'choices' in j and j['choices']:
+                        c = j['choices'][0]
+                        content = c.get('message', {}).get('content') or c.get('text')
+                        if content:
+                            return content.strip()
+                    return "Error: empty response"
+                elif r.status_code == 429:
+                    logger.warning(f"Grok rate limited, waiting {attempt * 10}s...")
+                    time.sleep(attempt * 10)
+                    continue
+                else:
+                    logger.error(f"Grok API error: {r.status_code} - {r.text[:200]}")
+                    
+            except requests.exceptions.Timeout:
+                logger.warning(f"Grok timeout on attempt {attempt}")
+                if attempt < len(timeouts):
+                    time.sleep(5)
+                    continue
+            except Exception as e:
+                logger.error(f"Grok exception on attempt {attempt}: {e}")
+                if attempt < len(timeouts):
+                    time.sleep(5)
+                    continue
+                    
+        return "Error: All Grok API attempts failed"
 
     def _call_claude(self, context):
         key = os.getenv('CLAUDE_API_KEY')
@@ -121,13 +152,13 @@ class SimpleDebate:
             'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Groks analogies. '
             'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.\n' +
             f'Conversation:\n{context}\n\n' +
-            'Reply in 1 engaging, evidence-based sentences as if responding on a social platform.'
+            'Reply in 1–2 engaging, evidence-based sentences as if responding on a social platform.'
         )
         
         payload = {
             'model': 'claude-sonnet-4-20250514',
-            'max_tokens': 500,
-            'temperature': 1.0,
+            'max_tokens': 300,
+            'temperature': 0.7,
             'messages': [
                 {'role': 'user', 'content': user_content}
             ]
@@ -163,12 +194,18 @@ def health():
 @app.route('/stream')
 def stream():
     def gen():
+        # Send existing history once
         for m in debate.history:
             yield f"data: {json.dumps({'message': m})}\n\n"
+        
+        # Start debate if not running
+        if not debate.running:
+            debate.start()
+            
+        # Then only send new messages
         while True:
-            if not debate.running:
-                debate.start()
-            for m in debate.get_new():
+            new_messages = debate.get_new()
+            for m in new_messages:
                 yield f"data: {json.dumps({'message': m})}\n\n"
             time.sleep(1)
     return Response(stream_with_context(gen()), mimetype='text/event-stream')
