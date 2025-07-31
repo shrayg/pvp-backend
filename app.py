@@ -75,7 +75,7 @@ class SimpleDebate:
             'model': 'grok-4',
             'messages': [
                 {'role': 'system', 'content': (
-                    'You are Grok, a witty and candid AI speaking like a real Instagram user. '
+                     'You are Grok, a witty and candid AI speaking like a real Instagram user. '
                     'Use casual language, slang, but always back your points with '
                     'specific examples or references (e.g., mention studies, data, or well-known facts).'
                     'Do not use emojis or hashtags, and avoid overly formal language. '
@@ -86,7 +86,7 @@ class SimpleDebate:
                 {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 casual, evidence-backed sentences as if posting on social media."}
             ],
             'stream': False,
-            'temperature': 2.0
+            'temperature': 0.8
         }
         logger.info("Grok → sending request")
         try:
@@ -96,7 +96,6 @@ class SimpleDebate:
             return f"Error: {e}"
         if r.status_code != 200:
             return f"Error: {r.status_code} {r.text[:100]}"
-        # extract content
         if 'choices' in j and j['choices']:
             c = j['choices'][0]
             content = c.get('message', {}).get('content') or c.get('text')
@@ -112,21 +111,24 @@ class SimpleDebate:
             'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01'
         }
-        payload = {
-            'model': 'claude-sonnet-4-20250514',
-            'max_tokens': 500,
-            'temperature': 1.0,
-            'messages': [
-                {'role': 'system', 'content': (
-                    'You are Claude, a thoughtful AI influencer on social media. '
+        # Combine system instructions into a single user message to avoid role errors
+        user_content = (
+            'You are Claude, a thoughtful AI influencer on social media. '
                     'Speak casually and conversationally, but support each statement with real evidence, '
                     'such as citing studies, quoting experts, or linking to data when relevant.'
                     'Do not use emojis or hashtags, and avoid overly formal language. '
                     'Do not set your responses up to fail, and do not use phrases like "I am not sure" or "I cannot answer this". '
                     'Its fine if you drift from the debate a little bit and its encourage to slowly drift away from the main topic to prove your point. Such as giving an analogy or a story and/or just attacking Groks analogies.'
-                    'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.'
-                )},
-                {'role': 'user', 'content': f"Conversation:\n{context}\n\nReply in 1–2 engaging, evidence-based sentences as if responding on a social platform."}
+                    'This is a debate, so you can be a bit more aggressive and sarcastic than usual, but always back your points with specific examples or references.\n' +
+            f'Conversation:\n{context}\n\n' +
+            'Reply in 1–2 engaging, evidence-based sentences as if responding on a social platform.'
+        )
+        payload = {
+            'model': 'claude-sonnet-4-20250514',
+            'max_tokens': 300,
+            'temperature': 0.7,
+            'messages': [
+                {'role': 'user', 'content': user_content}
             ]
         }
         logger.info("Claude → sending request")
@@ -144,6 +146,7 @@ class SimpleDebate:
         return "Error: malformed response"
 
 # Initialize debate and routes
+
 
 debate = SimpleDebate()
 
